@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Robo Face HTML/CSS</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            background-color: black;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            font-family: sans-serif;
+            overflow: hidden;
+        }
+
+        .face-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 70px; /* Space between eyes */
+            animation: floating 4s ease-in-out infinite alternate;
+        }
+
+        .eye {
+            background-color: #ff5252; /* Red accent */
+            box-shadow: 0 0 30px 10px rgba(255, 82, 82, 0.6);
+            /* Base Neutral State (Vertical Pills) */
+            width: 85px;
+            height: 140px;
+            border-radius: 50px;
+            
+            /* Powerful transition for bouncy animation */
+            transition: all 0.5s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+            
+            /* Blink animation attached */
+            animation: blink 4s infinite;
+            transform-origin: center;
+        }
+
+        /* ------------------------- 
+           EMOTION STATES 
+        ------------------------- */
+        
+        .face-container.happy .eye {
+            width: 100px;
+            height: 70px;
+            border-radius: 100px 100px 15px 15px; /* ^ ^ shape */
+        }
+
+        .face-container.speaking .eye {
+            width: 110px;
+            height: 40px;
+            border-radius: 20px;
+        }
+
+        .face-container.listening .eye {
+            width: 120px;
+            height: 120px;
+            border-radius: 60px;
+        }
+
+        .face-container.thinking .eye {
+            width: 85px;
+            height: 60px;
+            border-radius: 30px;
+        }
+
+        .face-container.reminder .eye {
+            background-color: red;
+            box-shadow: 0 0 50px 20px rgba(255, 0, 0, 0.8);
+            width: 140px;
+            height: 140px;
+            border-radius: 70px;
+        }
+
+        /* ------------------------- 
+           KEYFRAME ANIMATIONS
+        ------------------------- */
+
+        /* Simulates gentle idle hovering */
+        @keyframes floating {
+            0% { transform: translateY(-10px) translateX(-5px); }
+            100% { transform: translateY(10px) translateX(5px); }
+        }
+
+        /* Random-look blink */
+        @keyframes blink {
+            0%, 46%, 50%, 100% { transform: scaleY(1); }
+            48% { transform: scaleY(0.05); } /* Swift close */
+        }
+
+        /* ------------------------- 
+           CONTROLS (Just for demo)
+        ------------------------- */
+        .controls {
+            position: absolute;
+            bottom: 40px;
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        button {
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 20px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: background 0.2s;
+        }
+
+        button:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+    </style>
+</head>
+<body>
+
+    <div class="face-container" id="face">
+        <div class="eye"></div>
+        <div class="eye"></div>
+    </div>
+
+    <!-- Interactive Buttons to see the transitions -->
+    <div class="controls">
+        <button onclick="setEmotion('neutral')">Neutral</button>
+        <button onclick="setEmotion('happy')">Happy</button>
+        <button onclick="setEmotion('speaking')">Speaking</button>
+        <button onclick="setEmotion('listening')">Listening</button>
+        <button onclick="setEmotion('thinking')">Thinking</button>
+        <button onclick="setEmotion('reminder')">Reminder Alert!</button>
+    </div>
+
+    <script>
+        const face = document.getElementById('face');
+
+        function setEmotion(emotion) {
+            // Remove all specific emotion classes
+            face.className = 'face-container';
+            
+            // Add the new emotion class if it's not neutral
+            if(emotion !== 'neutral') {
+                face.classList.add(emotion);
+            }
+        }
+    </script>
+</body>
+</html>

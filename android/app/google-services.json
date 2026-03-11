@@ -1,0 +1,30 @@
+{
+  "project_info": {
+    "project_number": "221220474869",
+    "firebase_url": "https://carepulse-a3765-default-rtdb.firebaseio.com",
+    "project_id": "carepulse-a3765",
+    "storage_bucket": "carepulse-a3765.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:221220474869:android:2572bcc45ca43a43d35abc",
+        "android_client_info": {
+          "package_name": "com.example.carepulseapp"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBg4u0geCv-ZGxJkQACCKGeLkKX42_HK5U"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
