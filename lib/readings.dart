@@ -19,6 +19,7 @@ class _ViewReadingsPageState extends State<ViewReadingsPage> with TickerProvider
   double? heartRate;
   double? oxygenLevel;
   double? temperature;
+  List<dynamic> _readingsHistory = [];
 
   @override
   void initState() {
@@ -33,18 +34,19 @@ class _ViewReadingsPageState extends State<ViewReadingsPage> with TickerProvider
         _error = null;
       });
 
-      final response = await _dio.get('$baseUrl/api/readings/$lid');
+      final response = await _dio.get('$baseUrl/api/readings/$lid/');
       
       if (response.statusCode == 200) {
         final data = response.data;
 
         if (data is List && data.isNotEmpty) {
-          final latest = data.last;
+          final latest = data.first; // Backend sends newest first
 
           setState(() {
-            heartRate = double.tryParse(latest['heart'].toString());
-            oxygenLevel = double.tryParse(latest['oxygen'].toString());
-            temperature = double.tryParse(latest['temperature'].toString());
+            _readingsHistory = data;
+            heartRate = double.tryParse(latest['heart']?.toString() ?? '0');
+            oxygenLevel = double.tryParse(latest['oxygen']?.toString() ?? '0');
+            temperature = double.tryParse(latest['temperature']?.toString() ?? '0');
             _loading = false;
           });
         } else {
@@ -169,6 +171,27 @@ class _ViewReadingsPageState extends State<ViewReadingsPage> with TickerProvider
                             icon: Icons.thermostat_rounded,
                             accentColor: const Color(0xFFFFA726),
                           ),
+                          const SizedBox(height: 20),
+                          _buildSubmitActionButton(),
+                          const SizedBox(height: 40),
+                          
+                          // --- HISTORY SECTION ---
+                          const Text(
+                            "RECENT HISTORY (LAST 10)",
+                            style: TextStyle(
+                              color: Color(0xFF81D4FA),
+                              fontSize: 12,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: 2,
+                            ),
+                          ),
+                          const SizedBox(height: 20),
+                          
+                          if (_readingsHistory.isEmpty)
+                            const Center(child: Text("No history found", style: TextStyle(color: Colors.white24)))
+                          else
+                            ..._readingsHistory.map((item) => _buildHistoryItem(item)).toList(),
+                            
                           const SizedBox(height: 40),
                           Center(
                             child: Text(
@@ -289,6 +312,222 @@ class _ViewReadingsPageState extends State<ViewReadingsPage> with TickerProvider
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildSubmitActionButton() {
+    return GestureDetector(
+      onTap: () => _showAddReadingSheet(context),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(24),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+          child: Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: const Color(0xFF1A1A1C).withOpacity(0.6),
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(color: Colors.white.withOpacity(0.08)),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.add_circle_outline, color: const Color(0xFF81D4FA), size: 28),
+                const SizedBox(width: 12),
+                const Text(
+                  "Add New Reading",
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showAddReadingSheet(BuildContext context) {
+    final heartController = TextEditingController();
+    final oxygenController = TextEditingController();
+    final tempController = TextEditingController();
+    bool isSubmitting = false;
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setStateSheet) {
+          return Padding(
+            padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+            child: ClipRRect(
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(30)),
+              child: BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
+                child: Container(
+                  padding: const EdgeInsets.all(30),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF1A1A1C).withOpacity(0.85),
+                    borderRadius: const BorderRadius.vertical(top: Radius.circular(30)),
+                    border: Border.all(color: Colors.white.withOpacity(0.1)),
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: 40, height: 4,
+                        decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2)),
+                      ),
+                      const SizedBox(height: 24),
+                      const Text(
+                        "Submit Vital Reading",
+                        style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 8),
+                      const Text(
+                        "Enter the manual reading or simulate hardware.",
+                        style: TextStyle(color: Colors.white54, fontSize: 13),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 24),
+                      _buildInputField("Heart Rate (BPM)", heartController, Icons.favorite),
+                      const SizedBox(height: 16),
+                      _buildInputField("Blood Oxygen (%)", oxygenController, Icons.water_drop),
+                      const SizedBox(height: 16),
+                      _buildInputField("Temperature (°C)", tempController, Icons.thermostat),
+                      const SizedBox(height: 32),
+                      isSubmitting
+                          ? const CircularProgressIndicator(color: Color(0xFF81D4FA))
+                          : ElevatedButton(
+                              onPressed: () async {
+                                final h = double.tryParse(heartController.text);
+                                final o = double.tryParse(oxygenController.text);
+                                final t = double.tryParse(tempController.text);
+                                if (h == null || o == null || t == null) {
+                                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please enter valid numeric values')));
+                                  return;
+                                }
+
+                                setStateSheet(() => isSubmitting = true);
+                                try {
+                                  final response = await _dio.post(
+                                    '$baseUrl/test',
+                                    data: {
+                                      "user_id": lid,
+                                      "heart": h,
+                                      "oxygen": o,
+                                      "temperature": t
+                                    },
+                                  );
+
+                                  if (response.statusCode == 200 || response.statusCode == 201) {
+                                    Navigator.pop(context);
+                                    fetchReadings();
+                                  } else {
+                                    throw Exception('Failed to submit');
+                                  }
+                                } catch (e) {
+                                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: ${e.toString()}')));
+                                } finally {
+                                  if (mounted) setStateSheet(() => isSubmitting = false);
+                                }
+                              },
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: const Color(0xFF81D4FA),
+                                foregroundColor: Colors.black,
+                                padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 15),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                              ),
+                              child: const Text("Submit Reading", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                            ),
+                      const SizedBox(height: 10),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          );
+        }
+      ),
+    );
+  }
+
+  Widget _buildInputField(String hint, TextEditingController controller, IconData icon) {
+    return TextField(
+      controller: controller,
+      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+      style: const TextStyle(color: Colors.white),
+      decoration: InputDecoration(
+        hintText: hint,
+        hintStyle: TextStyle(color: Colors.white.withOpacity(0.3)),
+        prefixIcon: Icon(icon, color: const Color(0xFF81D4FA).withOpacity(0.8), size: 20),
+        filled: true,
+        fillColor: Colors.white.withOpacity(0.05),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: BorderSide.none,
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: BorderSide(color: Colors.white.withOpacity(0.05)),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: BorderSide(color: const Color(0xFF81D4FA).withOpacity(0.5)),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildHistoryItem(Map<String, dynamic> item) {
+    final String time = item['recorded_at'] != null 
+        ? item['recorded_at'].toString().split('T').first 
+        : "Recent";
+        
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.03),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: Colors.white.withOpacity(0.05)),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(time, style: const TextStyle(color: Colors.white38, fontSize: 10, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                   _miniStat(Icons.favorite, Colors.redAccent, "${item['heart']}"),
+                   const SizedBox(width: 12),
+                   _miniStat(Icons.water_drop, Colors.blueAccent, "${item['oxygen']}%"),
+                   const SizedBox(width: 12),
+                   _miniStat(Icons.thermostat, Colors.orangeAccent, "${item['temperature']}°"),
+                ],
+              ),
+            ],
+          ),
+          const Icon(Icons.check_circle_outline, color: Colors.greenAccent, size: 16),
+        ],
+      ),
+    );
+  }
+
+  Widget _miniStat(IconData icon, Color color, String val) {
+    return Row(
+      children: [
+        Icon(icon, color: color, size: 12),
+        const SizedBox(width: 4),
+        Text(val, style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
+      ],
     );
   }
 }

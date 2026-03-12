@@ -1,9 +1,11 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:google_generative_ai/google_generative_ai.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:open_filex/open_filex.dart';
+import 'package:dio/dio.dart';
+import 'package:carepulseapp/login.dart';
+import 'package:carepulseapp/loginApi.dart';
 
 class DietPlanPage extends StatefulWidget {
   final String predictionResult;
@@ -14,16 +16,13 @@ class DietPlanPage extends StatefulWidget {
 }
 
 class _DietPlanPageState extends State<DietPlanPage> {
-  late GenerativeModel model;
   bool isLoading = true;
   String dietAdvice = "";
-
-  final String geminiApiKey = "AIzaSyBYZWIBQdSKUFaYyqu7swWLAWOHBRAAShs";
+  final Dio _dio = Dio();
 
   @override
   void initState() {
     super.initState();
-    model = GenerativeModel(model: 'gemini-2.0-flash', apiKey: geminiApiKey);
     generateDietAdvice();
   }
 
@@ -42,19 +41,29 @@ class _DietPlanPageState extends State<DietPlanPage> {
         planDays = 14;
       }
 
-      final response = await model.generateContent([
-        Content.text(
-          "You are a certified nutritionist. Based on this medical prediction: '${widget.predictionResult}', "
-          "create a clear and simple ${planDays}-day eating plan. "
+      final String prompt = "Based on this medical prediction: '${widget.predictionResult}', "
+          "create a clear and simple $planDays-day eating plan. "
           "Include meals for Breakfast, Mid-morning snack, Lunch, Evening snack, and Dinner. "
-          "List foods in bullet points and give recommended portion sizes. Avoid disclaimers and focus on dietary changes."
-        )
-      ]);
+          "List foods in bullet points and give recommended portion sizes. Avoid disclaimers and focus on dietary changes.";
 
-      setState(() {
-        dietAdvice = response.text ?? "No diet plan generated.";
-        isLoading = false;
-      });
+      final response = await _dio.post(
+        "$baseUrl/api/ai/chat/",
+        data: {
+          "user_id": lid,
+          "text": prompt,
+          "mode": "diet",
+          "api_key": "AIzaSyCC14upg11ZwaBhQykonV5g-d-vq0QGBOc"
+        },
+      );
+
+      if (response.statusCode == 200) {
+        setState(() {
+          dietAdvice = response.data['response'] ?? "No diet plan generated.";
+          isLoading = false;
+        });
+      } else {
+        throw Exception("Server connection error.");
+      }
     } catch (e) {
       setState(() {
         dietAdvice = "⚠️ Error generating diet plan: $e";

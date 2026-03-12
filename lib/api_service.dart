@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 class ApiService {
-  /// Replace this with your actual local or production IP, e.g., 'https://5h44kl7q-8001.inc1.devtunnels.ms'
+  /// Replace this with your actual local or production IP, e.g., 'https://s16831sg-8000.inc1.devtunnels.ms/'
   final String baseUrl;
 
   ApiService({required this.baseUrl});

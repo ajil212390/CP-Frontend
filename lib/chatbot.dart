@@ -1,8 +1,14 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
-import 'package:google_generative_ai/google_generative_ai.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'package:flutter_tts/flutter_tts.dart';
+import 'package:dio/dio.dart';
+import 'package:carepulseapp/login.dart';
+import 'package:carepulseapp/loginApi.dart';
+import 'package:audioplayers/audioplayers.dart';
+import 'dart:convert';
+import 'dart:io';
+import 'package:path_provider/path_provider.dart';
 
 class ChatbotPage extends StatefulWidget {
   const ChatbotPage({Key? key}) : super(key: key);
@@ -20,16 +26,23 @@ class _ChatbotPageState extends State<ChatbotPage> with TickerProviderStateMixin
   bool _isLoading = false;
   bool _isMuted = false;
 
-  String _currentDisplayText = "Hi, I am CARE-AI, your personal health assistant. How can I help you today?";
-  String _statusText = "Tap the mic to start speaking...";
+  String _currentDisplayText = "How can I help you today?";
+  String _statusText = "Tap the mic to speak...";
   
-  // Gemini
-  late final GenerativeModel _model;
-  late final ChatSession _chatSession;
+  final Dio _dio = Dio();
+  final AudioPlayer _audioPlayer = AudioPlayer();
   
   // Animation controllers for the waveform
   late List<AnimationController> _waveControllers;
   late List<Animation<double>> _waveAnimations;
+
+  String _userContext = "";
+  final String _commonInstructions = """
+Instructions:
+1. For simple questions, give a very short 1-2 sentence answer.
+2. Only provide a 3-sentence response if the user specifically asks for details, history, or a full health status.
+3. Strictly NO long paragraphs. Keep it punchy and empathetic.
+""";
 
   final String _systemInstruction = '''
 You are CARE-AI, an intelligent male health assistant integrated into the CARE mobile application.
@@ -48,8 +61,44 @@ CONVERSATION STYLE: Friendly, easy to understand, very conversational, and short
     super.initState();
     _initSpeech();
     _initTts();
-    _initGemini();
+    _loadUserContext(); // Load health history for context
     _setupWaveformAnimation();
+    
+    // Auto-speak the first message using local TTS
+    Future.delayed(const Duration(milliseconds: 500), () {
+      if (!_isMuted) _speak(_currentDisplayText);
+    });
+  }
+
+  Future<void> _loadUserContext() async {
+    String contextInfo = "User: You\n";
+    try {
+      // Fetch Predictions
+      final predRes = await _dio.get("$baseUrl/api/prediction-history/$lid/");
+      if (predRes.statusCode == 200) {
+        final history = predRes.data['prediction_history'] ?? [];
+        if (history.isNotEmpty) {
+          contextInfo += "\nRecent Health History:\n";
+          for (var item in (history as List).take(3)) {
+            contextInfo += "- ${item['result']} (Date: ${item['createdAt']})\n";
+          }
+        }
+      }
+      // Fetch Alerts
+      final alertRes = await _dio.post("$baseUrl/api/alerts/", data: {"user_id": lid});
+      if (alertRes.statusCode == 200) {
+        final alerts = alertRes.data['alerts'] ?? [];
+        if (alerts.isNotEmpty) {
+          contextInfo += "\nActive Medication Alerts:\n";
+          for (var alert in (alerts as List).take(3)) {
+             contextInfo += "- ${alert['title']}: ${alert['description']} (Time: ${alert['start_time']})\n";
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint("Context load error: $e");
+    }
+    _userContext = contextInfo;
   }
   
   void _setupWaveformAnimation() {
@@ -178,18 +227,44 @@ CONVERSATION STYLE: Friendly, easy to understand, very conversational, and short
   }
 
   void _initGemini() {
-    const apiKey = 'AIzaSyD-0HlmOHfk5GnL3K9kXKdTvgmRCDLUceE'; 
-    _model = GenerativeModel(
-      model: 'gemini-2.0-flash',
-      apiKey: apiKey,
-      systemInstruction: Content.system(_systemInstruction),
-    );
-    _chatSession = _model.startChat(history: []);
-    
-    // Auto-speak the first message
+    // Auto-speak the first message using local TTS for greeting only
     Future.delayed(const Duration(milliseconds: 500), () {
       if (!_isMuted) _speak(_currentDisplayText);
     });
+  }
+
+  Future<void> _playServerAudio(String base64Audio) async {
+    try {
+      final bytes = base64Decode(base64Audio);
+      final dir = await getTemporaryDirectory();
+      final file = File('${dir.path}/ai_resp_${DateTime.now().millisecondsSinceEpoch}.mp3');
+      await file.writeAsBytes(bytes);
+      
+      // Stop any current speaking
+      await _stopSpeaking();
+      
+      _startWaveform();
+      setState(() {
+        _isSpeaking = true;
+        _statusText = "AI is speaking (Studio Cloud)...";
+      });
+
+      await _audioPlayer.play(DeviceFileSource(file.path));
+      
+      _audioPlayer.onPlayerComplete.listen((_) {
+        if (mounted) {
+          setState(() {
+             _isSpeaking = false;
+             _statusText = "Tap the mic to reply...";
+          });
+          _stopWaveform();
+        }
+      });
+    } catch (e) {
+      debugPrint("Audio playback error: $e");
+      // Fallback to local TTS if playback fails
+      _speak(_currentDisplayText);
+    }
   }
 
   Future<void> _speak(String text) async {
@@ -218,22 +293,74 @@ CONVERSATION STYLE: Friendly, easy to understand, very conversational, and short
     setState(() {
       _isLoading = true;
       _statusText = "Thinking...";
-      _currentDisplayText = text; // Show what the user just said
+      _currentDisplayText = text; 
     });
     
-    _startWaveform(); // Just a little animation while thinking
+    _startWaveform(); 
 
+    // 1. Try Local Ollama First
     try {
-      final response = await _chatSession.sendMessage(Content.text(text));
-      final responseText = response.text;
-      
-      if (responseText != null && responseText.isNotEmpty) {
+      final response = await _dio.post(
+        "$ollamaBaseUrl/api/generate",
+        data: {
+          "model": "llama3.2:1b",
+          "prompt": """SYSTEM: You are CARE-AI, an empathetic and intelligent robotic healthcare assistant.
+Your name is strictly CARE-AI. Never say you are Llama or any other model.
+PERSONALITY: Friendly, helpful, professional, and slightly robotic but caring.
+CONVERSATION RULES:
+1. Refer to the user as 'you', never as 'Patient'.
+2. Keep responses very short (1-3 sentences max).
+3. Answer the user's question directly. Do not repeat greeting phrases like 'How can I assist you today' unless it is part of a natural conversation.
+4. Use the health history below to give better advice.
+
+User Health History:
+$_userContext
+
+User Message: $text
+REPLY:""",
+          "stream": false
+        },
+      ).timeout(const Duration(seconds: 15));
+
+      if (response.statusCode == 200) {
+        final responseText = response.data['response'] as String?;
         setState(() {
           _isLoading = false;
-          _currentDisplayText = responseText.replaceAll('*', ''); // Clean markdown
+          _currentDisplayText = responseText ?? "No response received.";
         });
+        if (!_isMuted) _speak(_currentDisplayText);
+        return; 
+      }
+    } catch (e) {
+      debugPrint("Ollama Chatbot Fallback: $e");
+    }
+
+    // 2. Fallback to Cloud Brain
+    try {
+      final response = await _dio.post(
+        "$baseUrl/api/ai/chat/",
+        data: {
+          "user_id": lid,
+          "text": text,
+          "mode": "chat"
+        },
+      );
+
+      if (response.statusCode == 200) {
+        final responseText = response.data['response'] as String?;
+        final base64Audio = response.data['audio'] as String?;
+        
+        setState(() {
+          _isLoading = false;
+          _currentDisplayText = responseText ?? "No response received.";
+        });
+
         if (!_isMuted) {
-          _speak(_currentDisplayText);
+          if (base64Audio != null && base64Audio.isNotEmpty) {
+            _playServerAudio(base64Audio);
+          } else {
+            _speak(_currentDisplayText);
+          }
         } else {
            _stopWaveform();
            setState(() {
@@ -241,10 +368,7 @@ CONVERSATION STYLE: Friendly, easy to understand, very conversational, and short
            });
         }
       } else {
-        setState(() {
-          _isLoading = false;
-        });
-        _stopWaveform();
+        throw Exception("Server Error: ${response.statusCode}");
       }
     } catch (e) {
       setState(() {
@@ -575,24 +699,65 @@ class _ChatTextScreenState extends State<ChatTextScreen> {
   final ScrollController _scrollCtrl = ScrollController();
   final List<Map<String, String>> _messages = [];
   bool _isTyping = false;
-  late final GenerativeModel _model;
-  late ChatSession _chat;
+  final Dio _dio = Dio();
+  final AudioPlayer _audioPlayer = AudioPlayer();
+
+  String _userContext = "";
+  final String _commonInstructions = """
+Instructions:
+1. For simple questions, give a very short 1-2 sentence answer.
+2. Only provide a 3-sentence response if the user specifically asks for details, history, or a full health status.
+3. Strictly NO long paragraphs. Keep it punchy and empathetic.
+""";
 
   @override
   void initState() {
     super.initState();
-    _model = GenerativeModel(
-      model: 'gemini-2.0-flash',
-      apiKey: 'AIzaSyCfr4VDJfH4_WHlz2wV2JGGXmSVRXOJGaM',
-      systemInstruction: Content.system(
-        'You are CARE-AI, a knowledgeable medical and nutrition health assistant. '
-        'Give clear, accurate, and empathetic responses. Always recommend consulting '
-        'a doctor for serious medical concerns.',
-      ),
-    );
-    _chat = _model.startChat(history: []);
     // Greeting
-    _messages.add({'role': 'ai', 'text': 'Hi! I\'m CARE-AI 👋 How can I help you today?'});
+    _messages.add({'role': 'ai', 'text': 'How can I help you today? 👋'});
+    _loadHistory();
+    _loadUserContext();
+  }
+
+  Future<void> _loadUserContext() async {
+    String contextInfo = "User: You\n";
+    try {
+      final predRes = await _dio.get("$baseUrl/api/prediction-history/$lid/");
+      if (predRes.statusCode == 200) {
+        final history = predRes.data['prediction_history'] ?? [];
+        if (history.isNotEmpty) {
+          contextInfo += "\nRecent Health History:\n";
+          for (var item in (history as List).take(3)) {
+            contextInfo += "- ${item['result']} (Date: ${item['createdAt']})\n";
+          }
+        }
+      }
+    } catch (_) {}
+    _userContext = contextInfo;
+  }
+
+  Future<void> _loadHistory() async {
+    try {
+      final response = await _dio.get("$baseUrl/dietchat/?user_id=$lid");
+      if (response.statusCode == 200) {
+        final List<dynamic> data = response.data;
+        if (mounted) {
+          setState(() {
+            for (var item in data) {
+              if (item['question'] != null) {
+                _messages.add({'role': 'user', 'text': item['question']});
+              }
+              if (item['response'] != null) {
+                _messages.add({'role': 'ai', 'text': item['response']});
+              }
+            }
+          });
+          _scrollToBottom();
+        }
+      }
+    } catch (e) {
+      debugPrint("Error loading chat history: $e");
+    }
   }
 
   Future<void> _send() async {
@@ -606,13 +771,68 @@ class _ChatTextScreenState extends State<ChatTextScreen> {
     });
     _scrollToBottom();
 
+    // 1. Try Local Ollama First
     try {
-      final response = await _chat.sendMessage(Content.text(text));
-      final reply = response.text?.replaceAll('*', '') ?? 'Sorry, I couldn\'t understand that.';
-      setState(() {
-        _messages.add({'role': 'ai', 'text': reply});
-        _isTyping = false;
-      });
+      final response = await _dio.post(
+        "$ollamaBaseUrl/api/generate",
+        data: {
+          "model": "llama3.2:1b",
+          "prompt": """SYSTEM: You are CARE-AI, an empathetic and intelligent robotic healthcare assistant.
+Your name is strictly CARE-AI. Never say you are Llama or any other model.
+PERSONALITY: Friendly, helpful, professional, and slightly robotic but caring.
+CONVERSATION RULES:
+1. Refer to the user as 'you', never as 'Patient'.
+2. Keep responses very short (1-3 sentences max).
+3. Answer the user's question directly. Do not repeat greeting phrases like 'How can I assist you today' unless it is part of a natural conversation.
+4. Use the health history below to give better advice.
+
+User Health History:
+$_userContext
+
+User Message: $text
+REPLY:""",
+          "stream": false
+        },
+      ).timeout(const Duration(seconds: 15));
+
+      if (response.statusCode == 200) {
+        final reply = response.data['response'] ?? 'Sorry, I couldn\'t understand that.';
+        setState(() {
+          _messages.add({'role': 'ai', 'text': reply});
+          _isTyping = false;
+        });
+        _scrollToBottom();
+        return;
+      }
+    } catch (e) {
+      debugPrint("Ollama Text Chat Fallback: $e");
+    }
+
+    // 2. Fallback to Cloud Brain
+    try {
+      final response = await _dio.post(
+        "$baseUrl/api/ai/chat/",
+        data: {
+          "user_id": lid,
+          "text": text,
+          "mode": "chat"
+        },
+      );
+
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        final reply = response.data['response'] ?? 'Sorry, I couldn\'t understand that.';
+        final base64Audio = response.data['audio'] as String?;
+
+        setState(() {
+          _messages.add({'role': 'ai', 'text': reply});
+          _isTyping = false;
+        });
+
+        // Play audio in text mode too for premium experience
+        if (base64Audio != null && base64Audio.isNotEmpty) {
+           _playStaticAudio(base64Audio);
+        }
+      }
     } catch (_) {
       setState(() {
         _messages.add({'role': 'ai', 'text': 'I\'m having trouble connecting. Please try again.'});
@@ -620,6 +840,18 @@ class _ChatTextScreenState extends State<ChatTextScreen> {
       });
     }
     _scrollToBottom();
+  }
+
+  Future<void> _playStaticAudio(String base64Audio) async {
+    try {
+      final bytes = base64Decode(base64Audio);
+      final dir = await getTemporaryDirectory();
+      final file = File('${dir.path}/chat_resp_${DateTime.now().millisecondsSinceEpoch}.mp3');
+      await file.writeAsBytes(bytes);
+      await _audioPlayer.play(DeviceFileSource(file.path));
+    } catch (e) {
+      debugPrint("Static audio error: $e");
+    }
   }
 
   void _scrollToBottom() {

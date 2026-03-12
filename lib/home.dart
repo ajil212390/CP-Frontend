@@ -1,9 +1,9 @@
 import 'dart:ui';
+import 'dart:async';
 import 'package:carepulseapp/alertlist.dart';
 import 'package:carepulseapp/login.dart';
 import 'package:carepulseapp/medicalreport.dart';
 import 'package:carepulseapp/medicine_reminder.dart';
-import 'package:carepulseapp/readings.dart';
 import 'package:carepulseapp/chatbot.dart';
 import 'package:carepulseapp/profile.dart';
 import 'package:carepulseapp/loginApi.dart';
@@ -27,6 +27,13 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
   // Smart Nav visibility
   late AnimationController _navAnimationController;
   bool _isNavVisible = true;
+  Timer? _vitalsTimer;
+  
+  // Real Vitals State
+  String _heartRate = "--";
+  String _oxygen = "--";
+  String _temperature = "--";
+  bool _isVitalsLoading = true;
 
   @override
   void initState() {
@@ -38,12 +45,21 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
       value: 1.0, // Initially visible
     );
     _fetchPendingAlertsCount();
+    _fetchLatestVitals(); // Initial fetch
+    
+    // Start periodic polling for live vitals on homepage
+    _vitalsTimer = Timer.periodic(const Duration(seconds: 5), (timer) {
+      if (mounted && _selectedIndex == 0) { // Only fetch when on Home tab
+        _fetchLatestVitals();
+      }
+    });
   }
 
   @override
   void dispose() {
     _pageController.dispose();
     _navAnimationController.dispose();
+    _vitalsTimer?.cancel(); // Important to cancel timer
     super.dispose();
   }
 
@@ -75,6 +91,59 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
       }
     } catch (e) {
       debugPrint("Error fetching alerts: $e");
+    }
+  }
+
+  Future<void> _fetchLatestVitals() async {
+    if (lid == null) {
+      debugPrint("❌ LID is null, cannot fetch vitals");
+      return;
+    }
+    try {
+      final apiUrl = "$baseUrl/api/readings/$lid/";
+      final response = await _dio.get(apiUrl);
+      if (response.statusCode == 200) {
+        final data = response.data;
+        debugPrint("📡 Received Vitals data: $data");
+
+        List<dynamic> readings = [];
+        if (data is List) {
+          readings = data;
+        } else if (data is Map && data.containsKey('readings')) {
+          readings = data['readings'];
+        }
+
+        if (readings.isNotEmpty) {
+          final latest = readings.first;
+          setState(() {
+            _heartRate = latest['heart']?.toString() ?? "--";
+            _oxygen = latest['oxygen']?.toString() ?? "--";
+            _temperature = latest['temperature']?.toString() ?? "--";
+            _isVitalsLoading = false;
+          });
+        } else {
+          debugPrint("⚠️ No readings found for user $lid");
+          setState(() {
+            _isVitalsLoading = false;
+            // Provide a clear indicator that we are waiting for data
+            if (_heartRate == "--") {
+              _heartRate = "N/A";
+              _oxygen = "N/A";
+              _temperature = "N/A";
+            }
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint("❌ Error fetching vitals: $e");
+      setState(() {
+        _isVitalsLoading = false;
+        if (_heartRate == "--") {
+           _heartRate = "Error";
+           _oxygen = "Error";
+           _temperature = "Error";
+        }
+      });
     }
   }
 
@@ -364,12 +433,10 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
                 pendingCount: _pendingAlertsCount,
                 onTap: () => _onItemTapped(2),
               ),
-              const SizedBox(height: 24),
+              const SizedBox(height: 16),
 
               // Vitals Overview Row
-              GestureDetector(
-                onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => ViewReadingsPage())),
-                child: ClipRRect(
+              ClipRRect(
                   borderRadius: BorderRadius.circular(24),
                   child: BackdropFilter(
                     filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
@@ -416,17 +483,44 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
                             crossAxisAlignment: CrossAxisAlignment.baseline,
                             textBaseline: TextBaseline.alphabetic,
                             children: [
-                              const Text("72", style: TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.w900)),
+                              Text(_heartRate, style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.w900)),
                               const SizedBox(width: 4),
                               Text("BPM", style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 13, fontWeight: FontWeight.bold)),
                             ],
                           ),
                         ],
-                      ),
                     ),
                   ),
                 ),
               ),
+              
+              const SizedBox(height: 16),
+              
+              // SpO2 and Temp Mini Cards
+              Row(
+                children: [
+                  Expanded(
+                    child: _buildVitalsMiniCard(
+                      icon: Icons.water_drop_rounded,
+                      color: const Color(0xFF42A5F5),
+                      title: "SPO2",
+                      value: _oxygen,
+                      unit: "%",
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: _buildVitalsMiniCard(
+                      icon: Icons.thermostat_rounded,
+                      color: const Color(0xFFFFA726),
+                      title: "TEMP",
+                      value: _temperature,
+                      unit: "°C",
+                    ),
+                  ),
+                ],
+              ),
+              
               const SizedBox(height: 100),
             ],
           ),
@@ -640,6 +734,47 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
                 )
               ],
             ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildVitalsMiniCard({
+    required IconData icon,
+    required Color color,
+    required String title,
+    required String value,
+    required String unit,
+  }) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(24),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+        child: Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: const Color(0xFF1A1A1C).withOpacity(0.6),
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: Colors.white.withOpacity(0.08)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(icon, color: color, size: 20),
+              const SizedBox(height: 12),
+              Text(title, style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 10, fontWeight: FontWeight.w800, letterSpacing: 1)),
+              const SizedBox(height: 4),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.baseline,
+                textBaseline: TextBaseline.alphabetic,
+                children: [
+                  Text(value, style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w900)),
+                  const SizedBox(width: 4),
+                  Text(unit, style: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 11, fontWeight: FontWeight.bold)),
+                ],
+              ),
+            ],
           ),
         ),
       ),
