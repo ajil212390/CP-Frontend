@@ -162,25 +162,36 @@ class _RoboModeScreenState extends State<RoboModeScreen> with TickerProviderStat
                           borderRadius: BorderRadius.circular(16),
                           border: Border.all(color: Colors.white.withOpacity(0.1)),
                         ),
-                        child: RichText(
-                          textAlign: TextAlign.center,
-                          text: TextSpan(
-                            style: TextStyle(
-                              color: Colors.white.withOpacity(0.9),
-                              fontSize: 18,
-                              fontWeight: FontWeight.w300,
-                              fontFamily: 'Inter',
+                        child: Builder(builder: (context) {
+                          // Clamp displayed text to avoid subtitle overflow
+                          final String displayText = _emotion == RoboEmotion.speaking
+                              ? _robotResponseText
+                              : _recognizedSpeech;
+                          final String truncated = displayText.length > 120
+                              ? '${displayText.substring(0, 120)}...'
+                              : displayText;
+                          return RichText(
+                            textAlign: TextAlign.center,
+                            maxLines: 3,
+                            overflow: TextOverflow.ellipsis,
+                            text: TextSpan(
+                              style: TextStyle(
+                                color: Colors.white.withOpacity(0.9),
+                                fontSize: 16,
+                                fontWeight: FontWeight.w300,
+                                fontFamily: 'Inter',
+                              ),
+                              children: [
+                                if (_emotion == RoboEmotion.speaking)
+                                  TextSpan(
+                                    text: "CARE-AI: ",
+                                    style: TextStyle(fontWeight: FontWeight.bold, color: _effectiveEyeColor),
+                                  ),
+                                TextSpan(text: truncated),
+                              ],
                             ),
-                            children: [
-                              if (_emotion == RoboEmotion.speaking) 
-                                TextSpan(
-                                  text: "CARE-AI: ",
-                                  style: TextStyle(fontWeight: FontWeight.bold, color: _effectiveEyeColor),
-                                ),
-                              TextSpan(text: _emotion == RoboEmotion.speaking ? _robotResponseText : _recognizedSpeech),
-                            ],
-                          ),
-                        ),
+                          );
+                        }),
                       ),
                     ),
                 ],
@@ -540,20 +551,21 @@ class _RoboModeScreenState extends State<RoboModeScreen> with TickerProviderStat
         "$ollamaBaseUrl/api/generate",
         data: {
           "model": "llama3.2:1b", // Faster 1B parameter model
-          "prompt": """You are CARE-AI, a friendly robotic healthcare assistant. 
-Context (Your health data): 
+          "prompt": """You are CARE-AI, a robotic healthcare assistant already in conversation.
+Context (User health data): 
 $_userContext
 Current Time: ${DateTime.now().hour}:${DateTime.now().minute}
 
-Question from the user: $text
+User says: $text
 
-Instructions:
-1. For simple questions, give a very short 1-2 sentence answer.
-2. Only provide a 3-sentence response if the user specifically asks for details, history, or a full health status.
-3. Strictly NO long paragraphs. Keep it punchy and empathetic.""",
+Rules (follow strictly):
+- NEVER say "How can I help you" or introduce yourself again. You already did that.
+- For simple fact questions (e.g. temperature, heart rate, medication), answer in ONE short sentence only. Example: "Your temperature is 37.2°C."
+- Only elaborate if the user explicitly asks for details or explanation.
+- No bullet points. No long paragraphs. Max 2 sentences.""",
           "stream": false
         },
-      ).timeout(const Duration(seconds: 20)); // Increased timeout for heavy initial loads
+      ).timeout(const Duration(seconds: 20));
 
       if (response.statusCode == 200) {
         final String responseText = response.data['response'] ?? "";
@@ -1201,7 +1213,12 @@ Instructions:
             Padding(
               padding: const EdgeInsets.all(16.0),
               child: GestureDetector(
-                onTap: () => Navigator.pop(context),
+                behavior: HitTestBehavior.opaque,
+                onTap: () {
+                  debugPrint("🚀 Exiting Robo Mode...");
+                  Navigator.of(context).pop(); // Close Drawer
+                  Navigator.of(context).pop(); // Exit Robo Mode
+                },
                 child: Container(
                   width: double.infinity,
                   padding: const EdgeInsets.symmetric(vertical: 10),

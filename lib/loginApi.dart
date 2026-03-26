@@ -4,8 +4,8 @@ import 'package:dio/dio.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 
 String baseUrl = "https://s16831sg-8000.inc1.devtunnels.ms";
-String sensorBaseUrl = "http://192.168.1.5:5000"; // Update with computer's local IP
-String ollamaBaseUrl = "http://192.168.1.5:11434"; // Fixed for your PC's local IP
+String sensorBaseUrl = "http://10.49.31.189:5000"; // Update with computer's local IP
+String ollamaBaseUrl = "http://10.49.31.189:11434"; // Fixed for your PC's local IP
 Future<void> sendFcmTokenToBackend(String userId) async {
   final dio = Dio();
   String? token = await FirebaseMessaging.instance.getToken();

@@ -1,5 +1,6 @@
 import 'dart:ui';
 import 'dart:async';
+import 'dart:math';
 import 'package:carepulseapp/alertlist.dart';
 import 'package:carepulseapp/login.dart';
 import 'package:carepulseapp/medicalreport.dart';
@@ -122,29 +123,32 @@ class _DashboardPageState extends State<DashboardPage> with SingleTickerProvider
             _isVitalsLoading = false;
           });
         } else {
-          debugPrint("⚠️ No readings found for user $lid");
-          setState(() {
-            _isVitalsLoading = false;
-            // Provide a clear indicator that we are waiting for data
-            if (_heartRate == "--") {
-              _heartRate = "N/A";
-              _oxygen = "N/A";
-              _temperature = "N/A";
-            }
-          });
+          debugPrint("⚠️ No readings found for user $lid. Using dummy data.");
+          _generateDummyVitals();
         }
       }
     } catch (e) {
-      debugPrint("❌ Error fetching vitals: $e");
-      setState(() {
-        _isVitalsLoading = false;
-        if (_heartRate == "--") {
-           _heartRate = "Error";
-           _oxygen = "Error";
-           _temperature = "Error";
-        }
-      });
+      debugPrint("❌ Error fetching vitals: $e. Using dummy data.");
+      _generateDummyVitals();
     }
+  }
+
+  void _generateDummyVitals() {
+    if (!mounted) return;
+    // Seed by current minute so it changes every minute as requested
+    final now = DateTime.now();
+    final seed = now.year + now.month + now.day + now.hour + now.minute + (lid ?? 0);
+    final random = Random(seed);
+    
+    setState(() {
+      // HR: 72-80
+      _heartRate = (72 + random.nextInt(9)).toString();
+      // Oxygen: 97-99 (Normal as requested)
+      _oxygen = (97 + random.nextInt(3)).toString();
+      // Temp: 36.4 - 37.0
+      _temperature = (36.4 + (random.nextDouble() * 0.6)).toStringAsFixed(1);
+      _isVitalsLoading = false;
+    });
   }
 
   void _onItemTapped(int index) {
